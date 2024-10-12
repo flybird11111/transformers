@@ -26,46 +26,6 @@ logger = logging.get_logger(__name__)
 
 VOCAB_FILES_NAMES = {"vocab_file": "vocab.txt"}
 
-PRETRAINED_VOCAB_FILES_MAP = {
-    "vocab_file": {
-        "google/electra-small-generator": (
-            "https://huggingface.co/google/electra-small-generator/resolve/main/vocab.txt"
-        ),
-        "google/electra-base-generator": "https://huggingface.co/google/electra-base-generator/resolve/main/vocab.txt",
-        "google/electra-large-generator": (
-            "https://huggingface.co/google/electra-large-generator/resolve/main/vocab.txt"
-        ),
-        "google/electra-small-discriminator": (
-            "https://huggingface.co/google/electra-small-discriminator/resolve/main/vocab.txt"
-        ),
-        "google/electra-base-discriminator": (
-            "https://huggingface.co/google/electra-base-discriminator/resolve/main/vocab.txt"
-        ),
-        "google/electra-large-discriminator": (
-            "https://huggingface.co/google/electra-large-discriminator/resolve/main/vocab.txt"
-        ),
-    }
-}
-
-PRETRAINED_POSITIONAL_EMBEDDINGS_SIZES = {
-    "google/electra-small-generator": 512,
-    "google/electra-base-generator": 512,
-    "google/electra-large-generator": 512,
-    "google/electra-small-discriminator": 512,
-    "google/electra-base-discriminator": 512,
-    "google/electra-large-discriminator": 512,
-}
-
-
-PRETRAINED_INIT_CONFIGURATION = {
-    "google/electra-small-generator": {"do_lower_case": True},
-    "google/electra-base-generator": {"do_lower_case": True},
-    "google/electra-large-generator": {"do_lower_case": True},
-    "google/electra-small-discriminator": {"do_lower_case": True},
-    "google/electra-base-discriminator": {"do_lower_case": True},
-    "google/electra-large-discriminator": {"do_lower_case": True},
-}
-
 
 # Copied from transformers.models.bert.tokenization_bert.load_vocab
 def load_vocab(vocab_file):
@@ -130,12 +90,12 @@ class ElectraTokenizer(PreTrainedTokenizer):
         strip_accents (`bool`, *optional*):
             Whether or not to strip all accents. If this option is not specified, then it will be determined by the
             value for `lowercase` (as in the original Electra).
+        clean_up_tokenization_spaces (`bool`, *optional*, defaults to `True`):
+            Whether or not to cleanup spaces after decoding, cleanup consists in removing potential artifacts like
+            extra spaces.
     """
 
     vocab_files_names = VOCAB_FILES_NAMES
-    pretrained_vocab_files_map = PRETRAINED_VOCAB_FILES_MAP
-    pretrained_init_configuration = PRETRAINED_INIT_CONFIGURATION
-    max_model_input_sizes = PRETRAINED_POSITIONAL_EMBEDDINGS_SIZES
 
     def __init__(
         self,
@@ -150,22 +110,9 @@ class ElectraTokenizer(PreTrainedTokenizer):
         mask_token="[MASK]",
         tokenize_chinese_chars=True,
         strip_accents=None,
+        clean_up_tokenization_spaces=True,
         **kwargs,
     ):
-        super().__init__(
-            do_lower_case=do_lower_case,
-            do_basic_tokenize=do_basic_tokenize,
-            never_split=never_split,
-            unk_token=unk_token,
-            sep_token=sep_token,
-            pad_token=pad_token,
-            cls_token=cls_token,
-            mask_token=mask_token,
-            tokenize_chinese_chars=tokenize_chinese_chars,
-            strip_accents=strip_accents,
-            **kwargs,
-        )
-
         if not os.path.isfile(vocab_file):
             raise ValueError(
                 f"Can't find a vocabulary file at path '{vocab_file}'. To load the vocabulary from a Google pretrained"
@@ -181,7 +128,23 @@ class ElectraTokenizer(PreTrainedTokenizer):
                 tokenize_chinese_chars=tokenize_chinese_chars,
                 strip_accents=strip_accents,
             )
-        self.wordpiece_tokenizer = WordpieceTokenizer(vocab=self.vocab, unk_token=self.unk_token)
+
+        self.wordpiece_tokenizer = WordpieceTokenizer(vocab=self.vocab, unk_token=str(unk_token))
+
+        super().__init__(
+            do_lower_case=do_lower_case,
+            do_basic_tokenize=do_basic_tokenize,
+            never_split=never_split,
+            unk_token=unk_token,
+            sep_token=sep_token,
+            pad_token=pad_token,
+            cls_token=cls_token,
+            mask_token=mask_token,
+            tokenize_chinese_chars=tokenize_chinese_chars,
+            strip_accents=strip_accents,
+            clean_up_tokenization_spaces=clean_up_tokenization_spaces,
+            **kwargs,
+        )
 
     @property
     def do_lower_case(self):
@@ -279,8 +242,8 @@ class ElectraTokenizer(PreTrainedTokenizer):
         self, token_ids_0: List[int], token_ids_1: Optional[List[int]] = None
     ) -> List[int]:
         """
-        Create a mask from the two sequences passed to be used in a sequence-pair classification task. A Electra
-        sequence pair mask has the following format:
+        Create a mask from the two sequences passed to be used in a sequence-pair classification task. A Electra sequence
+        pair mask has the following format:
 
         ```
         0 0 0 0 0 0 0 0 0 0 0 1 1 1 1 1 1 1 1 1
@@ -326,7 +289,7 @@ class ElectraTokenizer(PreTrainedTokenizer):
 
 
 # Copied from transformers.models.bert.tokenization_bert.BasicTokenizer
-class BasicTokenizer(object):
+class BasicTokenizer:
     """
     Constructs a BasicTokenizer that will run basic tokenization (punctuation splitting, lower casing, etc.).
 
@@ -488,7 +451,7 @@ class BasicTokenizer(object):
 
 
 # Copied from transformers.models.bert.tokenization_bert.WordpieceTokenizer
-class WordpieceTokenizer(object):
+class WordpieceTokenizer:
     """Runs WordPiece tokenization."""
 
     def __init__(self, vocab, unk_token, max_input_chars_per_word=100):

@@ -53,10 +53,8 @@ class IdeficsImageProcessor(BaseImageProcessor):
     Constructs a Idefics image processor.
 
     Args:
-        image_size (`int`, *optional*, defaults to `224`):
+        image_size (`int`, *optional*, defaults to 224):
             Resize to image size
-        image_num_channels (`int`, *optional*, defaults to `3`):
-            Number of image channels.
         image_mean (`float` or `List[float]`, *optional*, defaults to `IDEFICS_STANDARD_MEAN`):
             Mean to use if normalizing the image. This is a float or list of floats the length of the number of
             channels in the image. Can be overridden by the `image_mean` parameter in the `preprocess` method. Can be
@@ -65,6 +63,8 @@ class IdeficsImageProcessor(BaseImageProcessor):
             Standard deviation to use if normalizing the image. This is a float or list of floats the length of the
             number of channels in the image. Can be overridden by the `image_std` parameter in the `preprocess` method.
             Can be overridden by the `image_std` parameter in the `preprocess` method.
+        image_num_channels (`int`, *optional*, defaults to 3):
+            Number of image channels.
     """
 
     model_input_names = ["pixel_values"]
@@ -92,8 +92,9 @@ class IdeficsImageProcessor(BaseImageProcessor):
         image_mean: Optional[Union[float, List[float]]] = None,
         image_std: Optional[Union[float, List[float]]] = None,
         transform: Callable = None,
+        return_tensors: Optional[Union[str, TensorType]] = TensorType.PYTORCH,
         **kwargs,
-    ) -> TensorType.PYTORCH:
+    ) -> TensorType:
         """
         Preprocess a batch of images.
 
@@ -162,7 +163,6 @@ class IdeficsImageProcessor(BaseImageProcessor):
         images = [self.rescale(image=image, scale=1 / 255) for image in images]
         images = [self.normalize(x, mean=image_mean, std=image_std) for x in images]
         images = [to_channel_dimension_format(x, ChannelDimension.FIRST) for x in images]
-        # TODO: this converts to torch tensors - switch to convert_to_tensors once it becomes available
-        images = BatchFeature(data={"pixel_values": images}, tensor_type=TensorType.PYTORCH)["pixel_values"]
+        images = BatchFeature(data={"pixel_values": images}, tensor_type=return_tensors)["pixel_values"]
 
         return images

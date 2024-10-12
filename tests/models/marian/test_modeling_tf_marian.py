@@ -184,7 +184,6 @@ class TFMarianModelTest(TFModelTesterMixin, PipelineTesterMixin, unittest.TestCa
     all_generative_model_classes = (TFMarianMTModel,) if is_tf_available() else ()
     pipeline_model_mapping = (
         {
-            "conversational": TFMarianMTModel,
             "feature-extraction": TFMarianModel,
             "summarization": TFMarianMTModel,
             "text2text-generation": TFMarianMTModel,

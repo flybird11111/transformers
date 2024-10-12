@@ -12,8 +12,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-""" Tokenization classes for FNet model."""
-
+"""Tokenization classes for FNet model."""
 
 import os
 from shutil import copyfile
@@ -32,21 +31,6 @@ else:
 logger = logging.get_logger(__name__)
 VOCAB_FILES_NAMES = {"vocab_file": "spiece.model", "tokenizer_file": "tokenizer.json"}
 
-PRETRAINED_VOCAB_FILES_MAP = {
-    "vocab_file": {
-        "google/fnet-base": "https://huggingface.co/google/fnet-base/resolve/main/spiece.model",
-        "google/fnet-large": "https://huggingface.co/google/fnet-large/resolve/main/spiece.model",
-    },
-    "tokenizer_file": {
-        "google/fnet-base": "https://huggingface.co/google/fnet-base/resolve/main/tokenizer.json",
-        "google/fnet-large": "https://huggingface.co/google/fnet-large/resolve/main/tokenizer.json",
-    },
-}
-
-PRETRAINED_POSITIONAL_EMBEDDINGS_SIZES = {
-    "google/fnet-base": 512,
-    "google/fnet-large": 512,
-}
 
 SPIECE_UNDERLINE = "▁"
 
@@ -87,8 +71,6 @@ class FNetTokenizerFast(PreTrainedTokenizerFast):
     """
 
     vocab_files_names = VOCAB_FILES_NAMES
-    pretrained_vocab_files_map = PRETRAINED_VOCAB_FILES_MAP
-    max_model_input_sizes = PRETRAINED_POSITIONAL_EMBEDDINGS_SIZES
     model_input_names = ["input_ids", "token_type_ids"]
     slow_tokenizer_class = FNetTokenizer
 
@@ -108,11 +90,9 @@ class FNetTokenizerFast(PreTrainedTokenizerFast):
     ):
         # Mask token behave like a normal word, i.e. include the space before it and
         # is included in the raw text, there should be a match in a non-normalized sentence.
-        mask_token = (
-            AddedToken(mask_token, lstrip=True, rstrip=False, normalized=False)
-            if isinstance(mask_token, str)
-            else mask_token
-        )
+        mask_token = AddedToken(mask_token, lstrip=True, rstrip=False) if isinstance(mask_token, str) else mask_token
+        cls_token = AddedToken(cls_token, lstrip=False, rstrip=False) if isinstance(cls_token, str) else cls_token
+        sep_token = AddedToken(sep_token, lstrip=False, rstrip=False) if isinstance(sep_token, str) else sep_token
 
         super().__init__(
             vocab_file,

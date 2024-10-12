@@ -14,34 +14,24 @@
 # limitations under the License.
 """Tokenization class for VITS."""
 
-
 import json
 import os
 import re
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 from ...tokenization_utils import PreTrainedTokenizer
-from ...utils import is_phonemizer_available, logging
+from ...utils import is_phonemizer_available, is_uroman_available, logging
 
 
 if is_phonemizer_available():
     import phonemizer
 
+if is_uroman_available():
+    import uroman as ur
 
 logger = logging.get_logger(__name__)
 
 VOCAB_FILES_NAMES = {"vocab_file": "vocab.json"}
-
-PRETRAINED_VOCAB_FILES_MAP = {
-    "vocab_file": {
-        "facebook/mms-tts-eng": "https://huggingface.co/facebook/mms-tts-eng/resolve/main/vocab.json",
-    }
-}
-
-PRETRAINED_POSITIONAL_EMBEDDINGS_SIZES = {
-    # This model does not have a maximum input length.
-    "facebook/mms-tts-eng": 4096,
-}
 
 
 def has_non_roman_characters(input_string):
@@ -77,8 +67,6 @@ class VitsTokenizer(PreTrainedTokenizer):
     """
 
     vocab_files_names = VOCAB_FILES_NAMES
-    pretrained_vocab_files_map = PRETRAINED_VOCAB_FILES_MAP
-    max_model_input_sizes = PRETRAINED_POSITIONAL_EMBEDDINGS_SIZES
     model_input_names = ["input_ids", "attention_mask"]
 
     def __init__(
@@ -93,17 +81,6 @@ class VitsTokenizer(PreTrainedTokenizer):
         is_uroman=False,
         **kwargs,
     ) -> None:
-        super().__init__(
-            pad_token=pad_token,
-            unk_token=unk_token,
-            language=language,
-            add_blank=add_blank,
-            normalize=normalize,
-            phonemize=phonemize,
-            is_uroman=is_uroman,
-            **kwargs,
-        )
-
         with open(vocab_file, encoding="utf-8") as vocab_handle:
             self.encoder = json.load(vocab_handle)
 
@@ -115,12 +92,24 @@ class VitsTokenizer(PreTrainedTokenizer):
 
         self.is_uroman = is_uroman
 
+        super().__init__(
+            pad_token=pad_token,
+            unk_token=unk_token,
+            language=language,
+            add_blank=add_blank,
+            normalize=normalize,
+            phonemize=phonemize,
+            is_uroman=is_uroman,
+            **kwargs,
+        )
+
     @property
     def vocab_size(self):
         return len(self.encoder)
 
     def get_vocab(self):
         vocab = {self.convert_ids_to_tokens(i): i for i in range(self.vocab_size)}
+        vocab.update(self.added_tokens_encoder)
         return vocab
 
     def normalize_text(self, input_string):
@@ -185,11 +174,16 @@ class VitsTokenizer(PreTrainedTokenizer):
         filtered_text = self._preprocess_char(text)
 
         if has_non_roman_characters(filtered_text) and self.is_uroman:
-            logger.warning(
-                "Text to the tokenizer contains non-Roman characters. Ensure the `uroman` Romanizer is "
-                "applied to the text prior to passing it to the tokenizer. See "
-                "`https://github.com/isi-nlp/uroman` for details."
-            )
+            if not is_uroman_available():
+                logger.warning(
+                    "Text to the tokenizer contains non-Roman characters. To apply the `uroman` pre-processing "
+                    "step automatically, ensure the `uroman` Romanizer is installed with: `pip install uroman` "
+                    "Note `uroman` requires python version >= 3.10"
+                    "Otherwise, apply the Romanizer manually as per the instructions: https://github.com/isi-nlp/uroman"
+                )
+            else:
+                uroman = ur.Uroman()
+                filtered_text = uroman.romanize_string(filtered_text)
 
         if self.phonemize:
             if not is_phonemizer_available():

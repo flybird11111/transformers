@@ -36,13 +36,13 @@ being a large model means it requires significant computational resources and in
 this approach suits your use case better than fine-tuning specialized models for each individual task. 
 
 In this guide, you'll learn how to: 
-- [Load IDEFICS](#loading-the-model) and [load the quantized version of the model](#loading-the-quantized-version-of-the-model)
+- [Load IDEFICS](#loading-the-model) and [load the quantized version of the model](#quantized-model)
 - Use IDEFICS for: 
   - [Image captioning](#image-captioning)
   - [Prompted image captioning](#prompted-image-captioning)
   - [Few-shot prompting](#few-shot-prompting)
   - [Visual question answering](#visual-question-answering)
-  - [Image classificaiton](#image-classification)
+  - [Image classification](#image-classification)
   - [Image-guided text generation](#image-guided-text-generation)
 - [Run inference in batch mode](#running-inference-in-batch-mode)
 - [Run IDEFICS instruct for conversational use](#idefics-instruct-for-conversational-use)
@@ -109,7 +109,6 @@ on the fly while loading.
 Now that you have the model loaded in one of the suggested ways, let's move on to exploring tasks that you can use IDEFICS for.
 
 ## Image captioning
-
 Image captioning is the task of predicting a caption for a given image. A common application is to aid visually impaired 
 people navigate through different situations, for instance, explore image content online. 
 
@@ -229,7 +228,7 @@ Let's get a new image for this task:
      <img src="https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/transformers/tasks/idefics-vqa.jpg" alt="Image of a couple having a picnic"/>
 </div>
 
-Photo by [Jarritos Mexican Soda](https://unsplash.com/@jarritos).
+Photo by [Jarritos Mexican Soda](https://unsplash.com/@jarritos). 
 
 You can steer the model from image captioning to visual question answering by prompting it with appropriate instructions: 
 
@@ -276,7 +275,7 @@ We can instruct the model to classify the image into one of the categories that 
 >>> inputs = processor(prompt, return_tensors="pt").to("cuda")
 >>> bad_words_ids = processor.tokenizer(["<image>", "<fake_token_around_image>"], add_special_tokens=False).input_ids
 
->>> generated_ids = model.generate(**inputs, max_new_tokens=4, bad_words_ids=bad_words_ids)
+>>> generated_ids = model.generate(**inputs, max_new_tokens=6, bad_words_ids=bad_words_ids)
 >>> generated_text = processor.batch_decode(generated_ids, skip_special_tokens=True)
 >>> print(generated_text[0])
 Instruction: Classify the following image into a single category from the following list: ['animals', 'vegetables', 'city landscape', 'cars', 'office'].
@@ -357,7 +356,7 @@ for a batch of examples by passing a list of prompts:
 ...     ],
 ... ]
 
->>> inputs = processor(prompts, return_tensors="pt")
+>>> inputs = processor(prompts, return_tensors="pt").to("cuda")
 >>> bad_words_ids = processor.tokenizer(["<image>", "<fake_token_around_image>"], add_special_tokens=False).input_ids
 
 >>> generated_ids = model.generate(**inputs, max_new_tokens=10, bad_words_ids=bad_words_ids)

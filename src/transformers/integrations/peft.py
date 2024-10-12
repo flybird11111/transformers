@@ -11,8 +11,12 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+import importlib
 import inspect
-from typing import TYPE_CHECKING, Any, Dict, Optional
+import warnings
+from typing import Any, Dict, List, Optional, Union
+
+from packaging import version
 
 from ..utils import (
     check_peft_version,
@@ -24,16 +28,15 @@ from ..utils import (
 )
 
 
+if is_torch_available():
+    import torch
+
 if is_accelerate_available():
     from accelerate import dispatch_model
     from accelerate.utils import get_balanced_memory, infer_auto_device_map
 
 # Minimum PEFT version supported for the integration
 MIN_PEFT_VERSION = "0.5.0"
-
-if TYPE_CHECKING:
-    if is_torch_available():
-        import torch
 
 
 logger = logging.get_logger(__name__)
@@ -77,6 +80,8 @@ class PeftAdapterMixin:
         offload_index: Optional[int] = None,
         peft_config: Dict[str, Any] = None,
         adapter_state_dict: Optional[Dict[str, "torch.Tensor"]] = None,
+        low_cpu_mem_usage: bool = False,
+        adapter_kwargs: Optional[Dict[str, Any]] = None,
     ) -> None:
         """
         Load adapter weights from file or remote Hub folder. If you are not familiar with adapters and PEFT methods, we
@@ -97,7 +102,7 @@ class PeftAdapterMixin:
 
                 <Tip>
 
-                To test a pull request you made on the Hub, you can pass `revision="refs/pr/<pr_number>".
+                To test a pull request you made on the Hub, you can pass `revision="refs/pr/<pr_number>"`.
 
                 </Tip>
 
@@ -128,10 +133,30 @@ class PeftAdapterMixin:
             adapter_state_dict (`Dict[str, torch.Tensor]`, *optional*):
                 The state dict of the adapter to load. This argument is used in case users directly pass PEFT state
                 dicts
+            low_cpu_mem_usage (`bool`, *optional*, defaults to `False`):
+                Reduce memory usage while loading the PEFT adapter. This should also speed up the loading process.
+                Requires PEFT version 0.13.0 or higher.
+            adapter_kwargs (`Dict[str, Any]`, *optional*):
+                Additional keyword arguments passed along to the `from_pretrained` method of the adapter config and
+                `find_adapter_config_file` method.
         """
         check_peft_version(min_version=MIN_PEFT_VERSION)
 
+        # peft only supports low_cpu_mem_usage starting from v0.13.0
+        peft_load_kwargs = {}
+        if low_cpu_mem_usage:
+            min_version_lcmu = "0.13.0"
+            if version.parse(importlib.metadata.version("peft")) >= version.parse(min_version_lcmu):
+                peft_load_kwargs["low_cpu_mem_usage"] = low_cpu_mem_usage
+            else:
+                raise ValueError(
+                    "The version of PEFT you are using does not support `low_cpu_mem_usage` yet, "
+                    f"please install PEFT >= {min_version_lcmu}."
+                )
+
         adapter_name = adapter_name if adapter_name is not None else "default"
+        if adapter_kwargs is None:
+            adapter_kwargs = {}
 
         from peft import PeftConfig, inject_adapter_in_model, load_peft_weights
         from peft.utils import set_peft_model_state_dict
@@ -144,11 +169,33 @@ class PeftAdapterMixin:
                 "You should either pass a `peft_model_id` or a `peft_config` and `adapter_state_dict` to load an adapter."
             )
 
+        if "device" not in adapter_kwargs:
+            device = self.device if not hasattr(self, "hf_device_map") else list(self.hf_device_map.values())[0]
+        else:
+            device = adapter_kwargs.pop("device")
+
+        # To avoid PEFT errors later on with safetensors.
+        if isinstance(device, torch.device):
+            device = str(device)
+
+        # We keep `revision` in the signature for backward compatibility
+        if revision is not None and "revision" not in adapter_kwargs:
+            adapter_kwargs["revision"] = revision
+        elif revision is not None and "revision" in adapter_kwargs and revision != adapter_kwargs["revision"]:
+            logger.error(
+                "You passed a `revision` argument both in `adapter_kwargs` and as a standalone argument. "
+                "The one in `adapter_kwargs` will be used."
+            )
+
+        # Override token with adapter_kwargs' token
+        if "token" in adapter_kwargs:
+            token = adapter_kwargs.pop("token")
+
         if peft_config is None:
             adapter_config_file = find_adapter_config_file(
                 peft_model_id,
-                revision=revision,
                 token=token,
+                **adapter_kwargs,
             )
 
             if adapter_config_file is None:
@@ -159,18 +206,18 @@ class PeftAdapterMixin:
 
             peft_config = PeftConfig.from_pretrained(
                 peft_model_id,
-                revision=revision,
-                use_auth_token=token,
+                token=token,
+                **adapter_kwargs,
             )
 
         # Create and add fresh new adapters into the model.
-        inject_adapter_in_model(peft_config, self, adapter_name)
+        inject_adapter_in_model(peft_config, self, adapter_name, **peft_load_kwargs)
 
         if not self._hf_peft_config_loaded:
             self._hf_peft_config_loaded = True
 
         if peft_model_id is not None:
-            adapter_state_dict = load_peft_weights(peft_model_id, revision=revision, use_auth_token=token)
+            adapter_state_dict = load_peft_weights(peft_model_id, token=token, device=device, **adapter_kwargs)
 
         # We need to pre-process the state dict to remove unneeded prefixes - for backward compatibility
         processed_adapter_state_dict = {}
@@ -183,7 +230,9 @@ class PeftAdapterMixin:
             processed_adapter_state_dict[new_key] = value
 
         # Load state dict
-        incompatible_keys = set_peft_model_state_dict(self, processed_adapter_state_dict, adapter_name)
+        incompatible_keys = set_peft_model_state_dict(
+            self, processed_adapter_state_dict, adapter_name, **peft_load_kwargs
+        )
 
         if incompatible_keys is not None:
             # check only for unexpected keys
@@ -234,9 +283,7 @@ class PeftAdapterMixin:
             raise ValueError(f"Adapter with name {adapter_name} already exists. Please use a different name.")
 
         if not isinstance(adapter_config, PeftConfig):
-            raise ValueError(
-                f"adapter_config should be an instance of PeftConfig. Got {type(adapter_config)} instead."
-            )
+            raise TypeError(f"adapter_config should be an instance of PeftConfig. Got {type(adapter_config)} instead.")
 
         # Retrieve the name or path of the model, one could also use self.config._name_or_path
         # but to be consistent with what we do in PEFT: https://github.com/huggingface/peft/blob/6e783780ca9df3a623992cc4d1d665001232eae0/src/peft/mapping.py#L100
@@ -245,7 +292,7 @@ class PeftAdapterMixin:
 
         self.set_adapter(adapter_name)
 
-    def set_adapter(self, adapter_name: str) -> None:
+    def set_adapter(self, adapter_name: Union[List[str], str]) -> None:
         """
         If you are not familiar with adapters and PEFT methods, we invite you to read more about them on the PEFT
         official documentation: https://huggingface.co/docs/peft
@@ -253,24 +300,36 @@ class PeftAdapterMixin:
         Sets a specific adapter by forcing the model to use a that adapter and disable the other adapters.
 
         Args:
-            adapter_name (`str`):
-                The name of the adapter to set.
+            adapter_name (`Union[List[str], str]`):
+                The name of the adapter to set. Can be also a list of strings to set multiple adapters.
         """
         check_peft_version(min_version=MIN_PEFT_VERSION)
         if not self._hf_peft_config_loaded:
             raise ValueError("No adapter loaded. Please load an adapter first.")
+        elif isinstance(adapter_name, list):
+            missing = set(adapter_name) - set(self.peft_config)
+            if len(missing) > 0:
+                raise ValueError(
+                    f"Following adapter(s) could not be found: {', '.join(missing)}. Make sure you are passing the correct adapter name(s)."
+                    f" current loaded adapters are: {list(self.peft_config.keys())}"
+                )
         elif adapter_name not in self.peft_config:
             raise ValueError(
                 f"Adapter with name {adapter_name} not found. Please pass the correct adapter name among {list(self.peft_config.keys())}"
             )
 
         from peft.tuners.tuners_utils import BaseTunerLayer
+        from peft.utils import ModulesToSaveWrapper
 
         _adapters_has_been_set = False
 
         for _, module in self.named_modules():
-            if isinstance(module, BaseTunerLayer):
-                module.active_adapter = adapter_name
+            if isinstance(module, (BaseTunerLayer, ModulesToSaveWrapper)):
+                # For backward compatbility with previous PEFT versions
+                if hasattr(module, "set_adapter"):
+                    module.set_adapter(adapter_name)
+                else:
+                    module.active_adapter = adapter_name
                 _adapters_has_been_set = True
 
         if not _adapters_has_been_set:
@@ -291,10 +350,15 @@ class PeftAdapterMixin:
             raise ValueError("No adapter loaded. Please load an adapter first.")
 
         from peft.tuners.tuners_utils import BaseTunerLayer
+        from peft.utils import ModulesToSaveWrapper
 
         for _, module in self.named_modules():
-            if isinstance(module, BaseTunerLayer):
-                module.disable_adapters = True
+            if isinstance(module, (BaseTunerLayer, ModulesToSaveWrapper)):
+                # The recent version of PEFT need to call `enable_adapters` instead
+                if hasattr(module, "enable_adapters"):
+                    module.enable_adapters(enabled=False)
+                else:
+                    module.disable_adapters = True
 
     def enable_adapters(self) -> None:
         """
@@ -312,14 +376,22 @@ class PeftAdapterMixin:
 
         for _, module in self.named_modules():
             if isinstance(module, BaseTunerLayer):
-                module.disable_adapters = False
+                # The recent version of PEFT need to call `enable_adapters` instead
+                if hasattr(module, "enable_adapters"):
+                    module.enable_adapters(enabled=True)
+                else:
+                    module.disable_adapters = False
 
-    def active_adapter(self) -> str:
+    def active_adapters(self) -> List[str]:
         """
         If you are not familiar with adapters and PEFT methods, we invite you to read more about them on the PEFT
         official documentation: https://huggingface.co/docs/peft
 
-        Gets the current active adapter of the model.
+        Gets the current active adapters of the model. In case of multi-adapter inference (combining multiple adapters
+        for inference) returns the list of all active adapters so that users can deal with them accordingly.
+
+        For previous PEFT versions (that does not support multi-adapter inference), `module.active_adapter` will return
+        a single string.
         """
         check_peft_version(min_version=MIN_PEFT_VERSION)
 
@@ -333,7 +405,21 @@ class PeftAdapterMixin:
 
         for _, module in self.named_modules():
             if isinstance(module, BaseTunerLayer):
-                return module.active_adapter
+                active_adapters = module.active_adapter
+                break
+
+        # For previous PEFT versions
+        if isinstance(active_adapters, str):
+            active_adapters = [active_adapters]
+
+        return active_adapters
+
+    def active_adapter(self) -> str:
+        warnings.warn(
+            "The `active_adapter` method is deprecated and will be removed in a future version.", FutureWarning
+        )
+
+        return self.active_adapters()[0]
 
     def get_adapter_state_dict(self, adapter_name: Optional[str] = None) -> dict:
         """

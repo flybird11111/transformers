@@ -124,6 +124,7 @@ This checks that:
 - The translations of the READMEs and the index of the doc have the same model list as the main README (performed by `utils/check_copies.py`)
 - The auto-generated tables in the documentation are up to date (performed by `utils/check_table.py`)
 - The library has all objects available even if not all optional dependencies are installed (performed by `utils/check_dummies.py`)
+- All docstrings properly document the arguments in the signature of the object (performed by `utils/check_docstrings.py`)
 
 Should this check fail, the first two items require manual fixing, the last four can be fixed automatically for you by running the command
 
@@ -165,7 +166,7 @@ Note that instead of applying this to a whole class, you can apply it to the rel
 # Copied from transformers.models.bert.modeling_bert.BertPreTrainedModel._init_weights
 ```
 
-Sometimes the copy is exactly the same except for names: for instance in `RobertaAttention`, we use `RobertaSelfAttention` insted of `BertSelfAttention` but other than that, the code is exactly the same. This is why `# Copied from` supports simple string replacements with the follwoing syntax: `Copied from xxx with foo->bar`. This means the code is copied with all instances of `foo` being replaced by `bar`. You can see how it used [here](https://github.com/huggingface/transformers/blob/2bd7a27a671fd1d98059124024f580f8f5c0f3b5/src/transformers/models/roberta/modeling_roberta.py#L304C1-L304C86) in `RobertaAttention` with the comment:
+Sometimes the copy is exactly the same except for names: for instance in `RobertaAttention`, we use `RobertaSelfAttention` instead of `BertSelfAttention` but other than that, the code is exactly the same. This is why `# Copied from` supports simple string replacements with the following syntax: `Copied from xxx with foo->bar`. This means the code is copied with all instances of `foo` being replaced by `bar`. You can see how it used [here](https://github.com/huggingface/transformers/blob/2bd7a27a671fd1d98059124024f580f8f5c0f3b5/src/transformers/models/roberta/modeling_roberta.py#L304C1-L304C86) in `RobertaAttention` with the comment:
 
 ```py
 # Copied from transformers.models.bert.modeling_bert.BertAttention with Bert->Roberta

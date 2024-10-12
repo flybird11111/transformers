@@ -12,17 +12,17 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-""" Testing suite for the PyTorch Bros model. """
+"""Testing suite for the PyTorch Bros model."""
 
 import copy
 import unittest
 
-from transformers import BrosProcessor
-from transformers.testing_utils import require_torch, slow, torch_device
-from transformers.utils import cached_property, is_torch_available, is_vision_available
+from transformers.testing_utils import require_torch, require_torch_multi_gpu, slow, torch_device
+from transformers.utils import is_torch_available
 
 from ...test_configuration_common import ConfigTester
 from ...test_modeling_common import ModelTesterMixin, ids_tensor, random_attention_mask
+from ...test_pipeline_mixin import PipelineTesterMixin
 
 
 if is_torch_available():
@@ -34,9 +34,6 @@ if is_torch_available():
         BrosModel,
         BrosSpadeEEForTokenClassification,
         BrosSpadeELForTokenClassification,
-    )
-    from transformers.models.bros.modeling_bros import (
-        BROS_PRETRAINED_MODEL_ARCHIVE_LIST,
     )
 
 
@@ -273,7 +270,7 @@ class BrosModelTester:
 
 
 @require_torch
-class BrosModelTest(ModelTesterMixin, unittest.TestCase):
+class BrosModelTest(ModelTesterMixin, PipelineTesterMixin, unittest.TestCase):
     test_pruning = False
     test_torchscript = False
     test_mismatched_shapes = False
@@ -289,6 +286,25 @@ class BrosModelTest(ModelTesterMixin, unittest.TestCase):
         else ()
     )
     all_generative_model_classes = () if is_torch_available() else ()
+    pipeline_model_mapping = (
+        {"feature-extraction": BrosModel, "token-classification": BrosForTokenClassification}
+        if is_torch_available()
+        else {}
+    )
+
+    # BROS requires `bbox` in the inputs which doesn't fit into the above 2 pipelines' input formats.
+    # see https://github.com/huggingface/transformers/pull/26294
+    def is_pipeline_test_to_skip(
+        self,
+        pipeline_test_case_name,
+        config_class,
+        model_architecture,
+        tokenizer_name,
+        image_processor_name,
+        feature_extractor_name,
+        processor_name,
+    ):
+        return True
 
     def setUp(self):
         self.model_tester = BrosModelTester(self)
@@ -335,6 +351,7 @@ class BrosModelTest(ModelTesterMixin, unittest.TestCase):
         config_and_inputs = self.model_tester.prepare_config_and_inputs()
         self.model_tester.create_and_check_model(*config_and_inputs)
 
+    @require_torch_multi_gpu
     def test_multi_gpu_data_parallel_forward(self):
         super().test_multi_gpu_data_parallel_forward()
 
@@ -358,9 +375,9 @@ class BrosModelTest(ModelTesterMixin, unittest.TestCase):
 
     @slow
     def test_model_from_pretrained(self):
-        for model_name in BROS_PRETRAINED_MODEL_ARCHIVE_LIST[:1]:
-            model = BrosModel.from_pretrained(model_name)
-            self.assertIsNotNone(model)
+        model_name = "jinho8345/bros-base-uncased"
+        model = BrosModel.from_pretrained(model_name)
+        self.assertIsNotNone(model)
 
 
 def prepare_bros_batch_inputs():
@@ -412,13 +429,10 @@ def prepare_bros_batch_inputs():
 
 @require_torch
 class BrosModelIntegrationTest(unittest.TestCase):
-    @cached_property
-    def default_processor(self):
-        return BrosProcessor.from_pretrained("naver-clova-ocr/bros-base-uncased") if is_vision_available() else None
-
     @slow
     def test_inference_no_head(self):
-        model = BrosModel.from_pretrained("naver-clova-ocr/bros-base-uncased").to(torch_device)
+        model = BrosModel.from_pretrained("jinho8345/bros-base-uncased").to(torch_device)
+
         input_ids, bbox, attention_mask = prepare_bros_batch_inputs()
 
         with torch.no_grad():
@@ -434,7 +448,8 @@ class BrosModelIntegrationTest(unittest.TestCase):
         self.assertEqual(outputs.last_hidden_state.shape, expected_shape)
 
         expected_slice = torch.tensor(
-            [[-0.4027, 0.0756, -0.0647], [-0.0192, -0.0065, 0.1042], [-0.0671, 0.0214, 0.0960]]
+            [[-0.3074, 0.1363, 0.3143], [0.0925, -0.1155, 0.1050], [0.0221, 0.0003, 0.1285]]
         ).to(torch_device)
+        torch.set_printoptions(sci_mode=False)
 
         self.assertTrue(torch.allclose(outputs.last_hidden_state[0, :3, :3], expected_slice, atol=1e-4))
